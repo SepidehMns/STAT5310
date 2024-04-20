@@ -1,0 +1,166 @@
+
+```{r}
+pkg_list <- c("tidyverse","MASS", "ISLR","ISLR2", "dplyr", "caret","ModelMetrics",
+              "ggplot2", "corrplot") 
+# Install packages if needed
+for (pkg in pkg_list)
+{
+  # Try loading the library.
+  if ( ! library(pkg, logical.return=TRUE, character.only=TRUE) )
+    {
+         # If the library cannot be loaded, install it; then load.
+        install.packages(pkg)
+        library(pkg, character.only=TRUE)
+  }
+}
+```
+
+```{r}
+auto_mpg <- read.table("/Users/user1/Desktop/auto+mpg/auto-mpg.data", header = FALSE, na.strings = "?")
+names(auto_mpg) = c("mpg",
+                  "cylinders",
+                  "displacement",
+                  "horsepower",
+                  "weight",
+                  "acceleration",
+                  "modelyear",
+                  "origin",
+                  "carname"
+)
+
+#plot a histogram of the "mpg" variable
+hist(auto_mpg$mpg, main = "Distribution of Miles Per Gallon (mpg)", xlab = "mpg", ylab = "Frequency", col = "skyblue", border = "black")
+
+
+#check for missing values
+any(is.na(auto_mpg))
+
+#remove rows with missing values (if any)
+AutoM <- na.omit(auto_mpg)
+
+AutoM <- AutoM[, !colnames(AutoM) %in% c("carname","modelyear","origin")]
+AutoM <- scale(AutoM)
+
+AutoM <- as.data.frame(AutoM)  # Convert to dataframe
+
+Y <- matrix(AutoM$mpg , nrow = nrow(AutoM), ncol = 1)
+x <- data.matrix(AutoM[, -1])
+x <- scale(x)
+
+X <- cbind(rep(1, nrow(x)), x)
+
+```
+
+
+```{r}
+
+linear_log_likelihood = function(beta, X, Y){
+  n <- nrow(X)
+  mu <- X%*% beta
+  residuals <- Y - mu
+  sigma2 <- sum(residuals^2) / n
+  log_likelihood <- -(n/2) * log(2 * pi* sigma2) - (1/(2*sigma2)) * sum(residuals^2)
+  return(log_likelihood)
+}
+
+
+score_linear <- function(beta,  X, Y){
+  n <- nrow(X)
+  mu <- X%*% beta
+  residuals <- Y - mu
+  sigma2 <- sum(residuals^2) / n
+  
+  score <- -t(X) %*% residuals / sigma2
+  return(score)
+}
+
+fisher_information_linear <- function(beta, X, Y){
+  n <- nrow(X)
+  mu <- X%*% beta
+  residuals <- Y - mu
+  sigma2 <- sum(residuals^2) / n
+  
+  fisher_info <- t(X) %*% X / sigma2
+  return(fisher_info)
+}
+
+mle_regression <- function(x, y, sigma, max_iter=100, tol=1e-6) {
+  beta <- solve(t(X)%*%X)%*%t(X)%*%Y
+  for (i in 1:max_iter) {
+    
+    grad <- score_linear(beta, x, y)
+    fisher <- fisher_information_linear(beta, x, y)
+    update <- solve(fisher) %*% grad
+    beta <- beta - update
+    if (sqrt(sum(update^2)) < tol) {
+      break
+    }
+  }
+  return(beta)
+}
+
+```
+
+
+```{r}
+
+beta_mle <- mle_regression(X, Y,1, max_iter = 500, tol = 1e-6)
+
+#fit linear regression model using MLE
+model <- glm(mpg~cylinders+ displacement+horsepower+weight+acceleration, data = AutoM, family = gaussian(link = "identity"))
+
+#get residuals from the glm model
+residuals <- residuals(model)
+
+#create the four diagnostic plots
+par(mfrow = c(2, 2))  # Arrange plots in a 2x2 grid
+#Residuals vs Fitted Values
+plot(model, which = 1)
+#Normal Q-Q Plot (Quantile-Quantile Plot)
+plot(model, which = 2)
+#Scale-Location Plot (Squared Root of Standardized Residuals vs Fitted Values)
+plot(model, which = 3)
+#Residuals vs Leverage Plot
+plot(model, which = 5)
+
+print(beta_mle)
+print(model)
+
+```
+
+```{r}
+library(caret)
+
+n <- nrow(X)
+training.samples <- AutoM$mpg %>% createDataPartition(p = 0.8, list = FALSE)
+train.data <- AutoM[training.samples, ]
+test.data <- AutoM[-training.samples, ]
+
+#cross-validation
+model_cross <- train(
+mpg~., data = train.data, method = "pcr",
+scale = TRUE,
+trControl = trainControl("cv", number = 10),
+tuneLength = 10
+)
+
+#plot model RMSE vs different values of components
+plot(model_cross)
+
+#print the best tuning parameter that minimize cross-validation error
+model_cross$bestTune
+
+#summarize final model
+summary(model_cross$finalModel)
+
+#make predictions on test
+predictions <- model_cross %>% predict(test.data)
+
+#model performance metrics
+data.frame(
+RMSE = caret::RMSE(predictions, test.data$mpg),
+Rsquare = caret::R2(predictions, test.data$mpg)
+)
+```
+
+
